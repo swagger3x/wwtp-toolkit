@@ -137,6 +137,236 @@ def _state_weights(n: int) -> np.ndarray:
     return arr / arr.sum()
 
 
+# ── Index page builder ───────────────────────────────────────────────────────
+
+def _build_index(df, tier_summary):
+    """Write output/index.html reflecting the current run's actual counts."""
+    from datetime import datetime
+    import os
+
+    total = len(df)
+    with_flow = int(df["design_flow_mgd"].notna().sum()) if "design_flow_mgd" in df.columns else 0
+    with_viols = int((df["violations_3yr"] > 0).sum()) if "violations_3yr" in df.columns else 0
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # Collect optional state map links
+    state_map_links = ""
+    for f in sorted(Path("output/maps").glob("*_facilities.html")):
+        state = f.stem.replace("_facilities", "").upper()
+        size = os.path.getsize(f) // 1024
+        state_map_links += (
+            f'<div class="card map-card"><a href="maps/{f.name}" target="_blank">'
+            f'<div class="card-body"><h3>{state} State Map</h3>'
+            f'<p>Interactive facility map for {state}. ({size} KB)</p>'
+            f'<span class="badge">Open in browser →</span></div></a></div>\n'
+        )
+
+    # Tier summary rows
+    tier_rows = ""
+    if not tier_summary.empty:
+        for _, row in tier_summary.iterrows():
+            tier_rows += (
+                f"<tr><td>{row['tier']}</td><td>{row['flow_range']}</td>"
+                f"<td>{int(row['count'])}</td>"
+                f"<td>{row['total_flow_mgd']:.1f}</td>"
+                f"<td>{row['avg_violations']:.2f}</td></tr>\n"
+            )
+    else:
+        tier_rows = '<tr><td colspan="5" style="text-align:center;color:#999">No flow tier data</td></tr>'
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WWTP Toolkit — Output</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f0f4f8; color: #1a202c; min-height: 100vh; }}
+    header {{ background: #1a365d; color: white; padding: 28px 40px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }}
+    header h1 {{ font-size: 1.6rem; font-weight: 700; }}
+    header p  {{ margin-top: 4px; opacity: .75; font-size: .88rem; }}
+    main {{ max-width: 1100px; margin: 36px auto; padding: 0 24px 60px; }}
+    h2 {{ font-size: .95rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+          color: #2d3748; margin: 36px 0 14px; padding-bottom: 8px; border-bottom: 2px solid #bee3f8; }}
+    .stats {{ display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }}
+    .stat-box {{ background: white; border-radius: 10px; padding: 18px 24px; flex: 1; min-width: 140px;
+                 box-shadow: 0 1px 4px rgba(0,0,0,.1); text-align: center; }}
+    .stat-box .num {{ font-size: 2rem; font-weight: 700; color: #2b6cb0; }}
+    .stat-box .lbl {{ font-size: .78rem; color: #718096; margin-top: 3px; }}
+    .grid {{ display: grid; gap: 16px; }}
+    .grid-2 {{ grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }}
+    .card {{ background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.1);
+             overflow: hidden; transition: box-shadow .15s, transform .15s; }}
+    .card:hover {{ box-shadow: 0 4px 16px rgba(0,0,0,.15); transform: translateY(-2px); }}
+    .card-img img {{ width: 100%; display: block; border-bottom: 1px solid #e2e8f0; background: #edf2f7; }}
+    .card-body {{ padding: 16px; }}
+    .card-body h3 {{ font-size: .95rem; font-weight: 600; color: #2b6cb0; margin-bottom: 4px; }}
+    .card-body p  {{ font-size: .8rem; color: #718096; line-height: 1.5; }}
+    .card a {{ text-decoration: none; color: inherit; display: block; }}
+    .map-card .card-body::before {{ content: "🗺"; font-size: 1.3rem; display: block; margin-bottom: 8px; }}
+    .csv-card {{ display: flex; align-items: center; gap: 14px; padding: 14px 18px; }}
+    .csv-card .icon {{ width: 38px; height: 38px; min-width: 38px; background: #ebf8ff; border-radius: 8px;
+                       display: flex; align-items: center; justify-content: center; font-size: 1.1rem; }}
+    .csv-card .text h3 {{ font-size: .9rem; font-weight: 600; color: #2b6cb0; }}
+    .csv-card .text p  {{ font-size: .78rem; color: #718096; margin-top: 2px; }}
+    .badge {{ display: inline-block; background: #ebf8ff; color: #2b6cb0; font-size: .7rem;
+              font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-top: 6px; }}
+    table {{ width: 100%; border-collapse: collapse; background: white; border-radius: 10px;
+             overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.1); font-size: .85rem; }}
+    th {{ background: #ebf8ff; color: #2b6cb0; padding: 10px 14px; text-align: left;
+          font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }}
+    td {{ padding: 9px 14px; border-top: 1px solid #e2e8f0; color: #4a5568; }}
+    tr:hover td {{ background: #f7fafc; }}
+    footer {{ text-align: center; padding: 20px; font-size: .78rem; color: #a0aec0; }}
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>WWTP Toolkit — Output Dashboard</h1>
+  <p>US Wastewater Treatment Plant data &mdash; EPA ECHO &amp; CWA live APIs &mdash; Generated {generated}</p>
+</header>
+
+<main>
+
+  <h2>This Run</h2>
+  <div class="stats">
+    <div class="stat-box"><div class="num">{total:,}</div><div class="lbl">Facilities loaded</div></div>
+    <div class="stat-box"><div class="num">{with_flow:,}</div><div class="lbl">With design flow data</div></div>
+    <div class="stat-box"><div class="num">{with_viols:,}</div><div class="lbl">With violations (3yr)</div></div>
+  </div>
+
+  <h2>Flow Tier Breakdown</h2>
+  <table>
+    <thead><tr><th>Tier</th><th>Flow Range</th><th>Count</th><th>Total Flow (MGD)</th><th>Avg Violations</th></tr></thead>
+    <tbody>{tier_rows}</tbody>
+  </table>
+
+  <h2>Full Dataset</h2>
+  <div class="grid grid-2">
+    <div class="card"><a href="all_facilities.csv" download>
+      <div class="csv-card">
+        <div class="icon">📋</div>
+        <div class="text">
+          <h3>all_facilities.csv</h3>
+          <p>Complete {total:,}-row export with GPS, NPDES IDs, flow, violations, permit status.</p>
+          <span class="badge">⬇ Download CSV</span>
+        </div>
+      </div>
+    </a></div>
+  </div>
+
+  <h2>Interactive Maps</h2>
+  <div class="grid grid-2">
+    <div class="card map-card"><a href="maps/national_by_flow.html" target="_blank">
+      <div class="card-body">
+        <h3>National Map — Flow Capacity</h3>
+        <p>Markers colored by size tier: blue (micro) → red (major). Click any dot for details.</p>
+        <span class="badge">Open in browser →</span>
+      </div>
+    </a></div>
+    <div class="card map-card"><a href="maps/national_by_violations.html" target="_blank">
+      <div class="card-body">
+        <h3>National Map — Violation History</h3>
+        <p>Markers colored by 3-year compliance record: green (clean) → red (high violations).</p>
+        <span class="badge">Open in browser →</span>
+      </div>
+    </a></div>
+    <div class="card map-card"><a href="maps/violation_heatmap.html" target="_blank">
+      <div class="card-body">
+        <h3>Violation Density Heatmap</h3>
+        <p>Heat map weighted by violation count — shows geographic clusters of non-compliance.</p>
+        <span class="badge">Open in browser →</span>
+      </div>
+    </a></div>
+    {state_map_links}
+  </div>
+
+  <h2>Static Choropleth Maps</h2>
+  <div class="grid grid-2">
+    <div class="card card-img"><a href="maps/choropleth_count.png" target="_blank">
+      <img src="maps/choropleth_count.png" alt="Choropleth — Facility Count" />
+      <div class="card-body"><h3>Facility Count by State</h3><p>Bubble size = facilities per state.</p></div>
+    </a></div>
+    <div class="card card-img"><a href="maps/choropleth_flow.png" target="_blank">
+      <img src="maps/choropleth_flow.png" alt="Choropleth — Total Flow" />
+      <div class="card-body"><h3>Total Flow Capacity by State</h3><p>Bubble size = combined MGD per state.</p></div>
+    </a></div>
+  </div>
+
+  <h2>Summary Reports</h2>
+  <div class="grid grid-2">
+    <div class="card"><a href="reports/summary_by_state.csv" download><div class="csv-card">
+      <div class="icon">📊</div>
+      <div class="text"><h3>summary_by_state.csv</h3>
+      <p>Facility count, total flow, violations — grouped by state.</p>
+      <span class="badge">⬇ Download CSV</span></div>
+    </div></a></div>
+    <div class="card"><a href="reports/summary_by_flow_tier.csv" download><div class="csv-card">
+      <div class="icon">📊</div>
+      <div class="text"><h3>summary_by_flow_tier.csv</h3>
+      <p>Count and avg violations broken out by EPA size tier.</p>
+      <span class="badge">⬇ Download CSV</span></div>
+    </div></a></div>
+    <div class="card"><a href="reports/top_violator_states.csv" download><div class="csv-card">
+      <div class="icon">⚠️</div>
+      <div class="text"><h3>top_violator_states.csv</h3>
+      <p>Top 10 states by total violation count over 3 years.</p>
+      <span class="badge">⬇ Download CSV</span></div>
+    </div></a></div>
+  </div>
+
+  <h2>Filtered Lists</h2>
+  <div class="grid grid-2">
+    <div class="card"><a href="lists/major_violators_nationwide.csv" download><div class="csv-card">
+      <div class="icon">🚨</div>
+      <div class="text"><h3>major_violators_nationwide.csv</h3>
+      <p>Facilities with 5+ violations in the past 3 years.</p>
+      <span class="badge">⬇ Download CSV</span></div>
+    </div></a></div>
+    <div class="card"><a href="lists/top25_largest_plants.csv" download><div class="csv-card">
+      <div class="icon">🏭</div>
+      <div class="text"><h3>top25_largest_plants.csv</h3>
+      <p>Top 25 facilities by design flow capacity (MGD).</p>
+      <span class="badge">⬇ Download CSV</span></div>
+    </div></a></div>
+    <div class="card"><a href="lists/texas_large_plants.csv" download><div class="csv-card">
+      <div class="icon">💧</div>
+      <div class="text"><h3>texas_large_plants.csv</h3>
+      <p>Active TX facilities with design flow over 5 MGD.</p>
+      <span class="badge">⬇ Download CSV</span></div>
+    </div></a></div>
+    <div class="card"><a href="lists/small_plants_clean_record.csv" download><div class="csv-card">
+      <div class="icon">✅</div>
+      <div class="text"><h3>small_plants_clean_record.csv</h3>
+      <p>Small active facilities (under 0.5 MGD) with zero violations.</p>
+      <span class="badge">⬇ Download CSV</span></div>
+    </div></a></div>
+    <div class="card"><a href="lists/mississippi_river_dischargers.csv" download><div class="csv-card">
+      <div class="icon">🌊</div>
+      <div class="text"><h3>mississippi_river_dischargers.csv</h3>
+      <p>Facilities permitted to discharge into the Mississippi River.</p>
+      <span class="badge">⬇ Download CSV</span></div>
+    </div></a></div>
+    <div class="card"><a href="lists/gulf_coast_plants.csv" download><div class="csv-card">
+      <div class="icon">🌊</div>
+      <div class="text"><h3>gulf_coast_plants.csv</h3>
+      <p>Facilities within the Gulf Coast bounding box with flow over 0.1 MGD.</p>
+      <span class="badge">⬇ Download CSV</span></div>
+    </div></a></div>
+  </div>
+
+</main>
+<footer>WWTP Toolkit &mdash; data from EPA ECHO &amp; CWA &mdash; {generated}</footer>
+</body>
+</html>"""
+
+    Path("output/index.html").write_text(html, encoding="utf-8")
+    print(f"  ✓ output/index.html generated")
+
+
 # ── Full demo workflow ────────────────────────────────────────────────────────
 
 def run_demo():
@@ -249,22 +479,14 @@ def run_demo():
     top_violator_states.to_csv("output/reports/top_violator_states.csv")
     print(f"  Top 10 states by violations:\n{top_violator_states.to_string()}\n")
 
+    # ── 6. Generate index.html ────────────────────────────────────────────────
+    _build_index(df, tier_summary)
+
     print("="*60)
     print("  DEMO COMPLETE")
     print("="*60)
-    print("\nOutput files:")
-    print("  output/all_facilities.csv         — Full facility dataset")
-    print("  output/lists/                      — 6 filtered lists")
-    print("  output/maps/national_by_flow.html  — National interactive map")
-    print("  output/maps/national_by_violations.html")
-    print("  output/maps/violation_heatmap.html")
-    print("  output/maps/[state]_facilities.html — 5 state maps")
-    print("  output/maps/choropleth_*.png        — Static choropleth maps")
-    print("  output/reports/                    — Summary statistics CSVs")
-    print("\nNext steps:")
-    print("  1. Replace load_sample_data() with EPAExtractor() for live data")
-    print("  2. Add your Census API key for demographic cross-referencing")
-    print("  3. Use FacilityFilter.by_criteria() to build any custom list")
+    print("\n  → Open output/index.html in a browser (or serve the output/ folder)")
+    print("    to browse all maps, reports, and filtered lists.\n")
 
 
 if __name__ == "__main__":
