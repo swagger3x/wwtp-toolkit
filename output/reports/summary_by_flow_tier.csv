@@ -1,0 +1,6 @@
+tier,flow_range,count,total_flow_mgd,avg_violations
+micro,0–0.1 MGD,65,2.0,5.92
+small,0.1–1.0 MGD,105,41.3,6.12
+medium,1.0–10.0 MGD,105,309.9,5.72
+large,10.0–100.0 MGD,16,394.9,5.69
+major,100.0–∞ MGD,2,440.0,5.5
